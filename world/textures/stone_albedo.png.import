@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://cakeenr7ljw7i"
 path.s3tc="res://.godot/imported/stone_albedo.png-197abf2c3cd0bd3a16076af92c0d09c4.s3tc.ctex"
+path.etc2="res://.godot/imported/stone_albedo.png-197abf2c3cd0bd3a16076af92c0d09c4.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://world/textures/stone_albedo.png"
-dest_files=["res://.godot/imported/stone_albedo.png-197abf2c3cd0bd3a16076af92c0d09c4.s3tc.ctex"]
+dest_files=["res://.godot/imported/stone_albedo.png-197abf2c3cd0bd3a16076af92c0d09c4.s3tc.ctex", "res://.godot/imported/stone_albedo.png-197abf2c3cd0bd3a16076af92c0d09c4.etc2.ctex"]
 
 [params]
 

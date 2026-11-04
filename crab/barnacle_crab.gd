@@ -65,6 +65,10 @@ func use_ability() -> void:
 		leg.gripping = false
 
 
+func get_controls_hint() -> String:
+	return "Barnacle crab\nShift  let go\nWalks up barnacle walls"
+
+
 func can_mount(target: Node3D) -> bool:
 	return global_basis.y.y > MOUNT_TIP_Y and super(target)
 

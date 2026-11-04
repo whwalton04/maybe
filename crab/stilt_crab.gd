@@ -17,6 +17,10 @@ func use_ability() -> void:
 	_stilts_out = not _stilts_out
 
 
+func get_controls_hint() -> String:
+	return "Stilt crab\nShift  stilts up / down"
+
+
 func can_walk() -> bool:
 	return leg_extension == 1.0
 

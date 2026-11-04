@@ -8,3 +8,9 @@ extends ContactCrab
 ## Called by Player when the ability action is pressed.
 func use_ability() -> void:
 	pass
+
+
+## Its name and controls for the controls HUD (see ControlsHud), one per
+## line, plus a few words on anything it does by itself.
+func get_controls_hint() -> String:
+	return "Crab"

@@ -24,6 +24,9 @@ const SPHERE_SINK := 0.2
 # Floats per barnacle in the MultiMesh buffer: a 3×4 transform by rows, then
 # a colour.
 const STRIDE := 16
+# Bytes per barnacle as saved (see _pack()): its origin as three floats, its
+# basis as nine half floats by rows, then its colour as four bytes.
+const PACKED_SIZE := 34
 
 ## Radius of the circle (m).
 @export_range(0.05, 10.0, 0.01, "or_greater") var radius := 0.5:
@@ -87,10 +90,17 @@ const STRIDE := 16
 		_queue_rebuild()
 @export_tool_button("Rebuild", "Reload") var _rebuild_button := rebuild
 
-# The built barnacles, as a MultiMesh buffer: saved with the scene, so the
-# game doesn't rebuild them.
-@export_storage var _buffer := PackedFloat32Array()
-@export_storage var _count := 0
+# The built barnacles, packed small (see _pack()): saved with the scene, so
+# the game doesn't rebuild them, and kept to about a fifth of the size of the
+# MultiMesh buffer they unpack to, so as not to bloat it.
+@export_storage var _barnacles := PackedByteArray():
+	set(value):
+		_barnacles = value
+		_floats = _unpack(value)
+		_count = _floats.size() / STRIDE
+# The built barnacles, as a MultiMesh buffer.
+var _floats := PackedFloat32Array()
+var _count := 0
 
 static var _sphere: Mesh
 
@@ -115,6 +125,18 @@ func _ready() -> void:
 	set_notify_transform(Engine.is_editor_hint())
 	if _count == 0:
 		_queue_rebuild()
+
+
+# Scenes saved before _barnacles held the MultiMesh buffer as _buffer, and a
+# _count of barnacles in it.
+func _set(property: StringName, value: Variant) -> bool:
+	match property:
+		&"_buffer":
+			_barnacles = _pack(value)
+			return true
+		&"_count":
+			return true
+	return false
 
 
 func _notification(what: int) -> void:
@@ -187,8 +209,7 @@ func rebuild() -> void:
 					colors.sample(tint) if colors else _default_tint(tint))
 			count += 1
 
-	_count = count
-	_buffer = buffer
+	_barnacles = _pack(buffer)
 	_show_buffer()
 
 
@@ -200,10 +221,46 @@ static func _append(buffer: PackedFloat32Array, xform: Transform3D, color: Color
 			b.x.z, b.y.z, b.z.z, o.z, color.r, color.g, color.b, color.a])
 
 
+## Packs a MultiMesh buffer into PACKED_SIZE bytes per barnacle. Half floats
+## are plenty for a barnacle's few centimetres of basis; its origin, out to
+## the patch's radius, keeps full floats.
+static func _pack(buffer: PackedFloat32Array) -> PackedByteArray:
+	var count := buffer.size() / STRIDE
+	var bytes := PackedByteArray()
+	bytes.resize(count * PACKED_SIZE)
+	for i in count:
+		var f := i * STRIDE
+		var b := i * PACKED_SIZE
+		for row in 3:
+			bytes.encode_float(b + row * 4, buffer[f + row * 4 + 3])
+			for col in 3:
+				bytes.encode_half(b + 12 + (row * 3 + col) * 2, buffer[f + row * 4 + col])
+		for c in 4:
+			bytes[b + 30 + c] = clampi(roundi(buffer[f + 12 + c] * 255.0), 0, 255)
+	return bytes
+
+
+## Unpacks what _pack() packed into a MultiMesh buffer.
+static func _unpack(bytes: PackedByteArray) -> PackedFloat32Array:
+	var count := bytes.size() / PACKED_SIZE
+	var buffer := PackedFloat32Array()
+	buffer.resize(count * STRIDE)
+	for i in count:
+		var f := i * STRIDE
+		var b := i * PACKED_SIZE
+		for row in 3:
+			buffer[f + row * 4 + 3] = bytes.decode_float(b + row * 4)
+			for col in 3:
+				buffer[f + row * 4 + col] = bytes.decode_half(b + 12 + (row * 3 + col) * 2)
+		for c in 4:
+			buffer[f + 12 + c] = bytes[b + 30 + c] / 255.0
+	return buffer
+
+
 ## The origin of barnacle `index`, in the patch's space.
 func get_barnacle_position(index: int) -> Vector3:
 	var at := index * STRIDE
-	return Vector3(_buffer[at + 3], _buffer[at + 7], _buffer[at + 11])
+	return Vector3(_floats[at + 3], _floats[at + 7], _floats[at + 11])
 
 
 func _queue_rebuild() -> void:
@@ -221,8 +278,8 @@ func _update_shape() -> void:
 
 func _show_buffer() -> void:
 	var multimesh := _make_multimesh(_count)
-	if _count > 0 and _buffer.size() == _count * STRIDE:
-		multimesh.buffer = _buffer
+	if _count > 0:
+		multimesh.buffer = _floats
 	else:
 		multimesh.instance_count = 0
 	_instance.multimesh = multimesh

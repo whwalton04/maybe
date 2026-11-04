@@ -57,6 +57,10 @@ func use_ability() -> void:
 		grab(grab_candidate())
 
 
+func get_controls_hint() -> String:
+	return "Grab crab\nShift  grab / throw"
+
+
 ## The prop the ability would pick up: the nearest within grab_range that
 ## nobody holds and the crab isn't standing on (with most of its planted
 ## feet). Null with something riding it, as the prop would land on the
