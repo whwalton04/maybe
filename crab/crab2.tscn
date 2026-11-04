@@ -36,6 +36,7 @@ collision_layer = 2
 collision_mask = 3
 mass = 5.0
 physics_material_override = SubResource("PhysicsMaterial_shell")
+continuous_cd = true
 can_sleep = false
 angular_damp = 1.0
 script = ExtResource("1_crab2")

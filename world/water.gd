@@ -35,8 +35,9 @@ extends Node3D
 @export_range(0.0, 20.0, 0.1) var linear_drag := 2.0
 ## Slows a body turning in the water, per second.
 @export_range(0.0, 20.0, 0.1) var angular_drag := 2.0
-## Physics layers of the bodies the water floats.
-@export_flags_3d_physics var body_mask := 3
+## Physics layers of the bodies the water floats. A body with a floats()
+## method isn't pushed up while it returns false, only slowed.
+@export_flags_3d_physics var body_mask := 7
 
 @export_group("Look")
 ## Colour where the water is shallow; its alpha sets how see-through it is.
@@ -452,16 +453,26 @@ func _float(body: RigidBody3D) -> void:
 	if not box.has_volume():
 		return
 	var xform := body.global_transform
-	var height := (xform.basis * box.size).abs().y  # rough vertical extent
+	var center := xform * box.get_center()
 	var weight := body.mass * body.get_gravity().length()
+	var buoyant: bool = not body.has_method("floats") or body.call("floats")
 	var under := 0.0
 	for i in 8:
+		# Each corner stands for the slice of the body between it and the
+		# centre, so a body resting just clear of the surface, such as on a
+		# floe, isn't touched.
 		var corner := xform * box.get_endpoint(i)
-		var depth := height_at(corner) - corner.y
-		var share := clampf(depth / height + 0.5, 0.0, 1.0)
-		if share > 0.0:
+		var level := height_at(corner)
+		var low := minf(corner.y, center.y)
+		var high := maxf(corner.y, center.y)
+		var share := 0.0
+		if high - low > 1e-4:
+			share = clampf((level - low) / (high - low), 0.0, 1.0)
+		elif level > corner.y:
+			share = 1.0
+		if share > 0.0 and buoyant:
 			body.apply_force(Vector3.UP * buoyancy * weight * share / 8.0, corner - body.global_position)
-			under += share / 8.0
+		under += share / 8.0
 	if under > 0.0:
 		body.apply_central_force(-body.linear_velocity * linear_drag * body.mass * under)
 		var radius_sq := box.size.length_squared() * 0.25

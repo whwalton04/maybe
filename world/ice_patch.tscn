@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://world/ice_patch.gd" id="1_ice"]
+
+[node name="IcePatch" type="AnimatableBody3D"]
+collision_mask = 0
+script = ExtResource("1_ice")

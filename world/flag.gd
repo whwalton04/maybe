@@ -2,7 +2,8 @@ class_name Flag
 extends Node3D
 ## A pole with a triangular pennant. A crab coming near makes it the active
 ## flag, and the pennant turns the crabs' orange; only one flag is active at a
-## time. The player's rally action drops the group onto the active flag.
+## time. It remembers the crabs in the group that took it, and the player's
+## rally action drops those back onto it (see Player).
 
 ## Of the whole flag, about twice a crab's (m).
 @export_range(0.05, 3.0, 0.01) var height := 0.3
@@ -13,6 +14,10 @@ extends Node3D
 
 ## The active flag, or null.
 static var active: Flag
+
+## The crabs in the group when this flag was taken, and the one that took it
+## with its stack. Empty if it was activated with no crab.
+var crabs: Array[Node3D] = []
 
 var _pennant_mat: StandardMaterial3D
 
@@ -62,7 +67,21 @@ func get_top() -> Vector3:
 	return global_position + global_basis.y * height
 
 
-func activate() -> void:
+## Makes this the active flag, taken by `by`, if a crab: remembers its group
+## (the animals of the Player it's in, or failing that the scene's first
+## Player) and its stack.
+func activate(by: Node3D = null) -> void:
+	crabs.clear()
+	if by:
+		var player := by.get_parent() as Player
+		if not player:
+			player = _find_player()
+		if player:
+			crabs.append_array(player.get_animals())
+		var stack: Array = by.get_stacked() if by.has_method("get_stacked") else [by]
+		for crab in stack:
+			if crab not in crabs:
+				crabs.append(crab)
 	var was := active
 	active = self
 	if is_instance_valid(was) and was != self:
@@ -72,7 +91,14 @@ func activate() -> void:
 
 func _on_body_entered(body: Node3D) -> void:
 	if body is ContactCrab and active != self:
-		activate()
+		activate(body)
+
+
+func _find_player() -> Player:
+	for node in get_tree().root.find_children("*", "Node3D", true, false):
+		if node is Player:
+			return node
+	return null
 
 
 func _show_active() -> void:

@@ -23,16 +23,23 @@ extends Node3D
 ##
 ## While steering one animal, the animal it's looking at (nearest the middle of
 ## the view, within its mount_range) is marked with an arrow, and the mount
-## action (space) puts it on top. Animals mounted on others aren't steered, so
-## a stack walks as one. One mounted with nothing to mount looked at marks the
+## action (space) puts it on top. A stack walks as one: steering any animal in
+## it walks the one at the bottom. One mounted with nothing to mount looked at marks the
 ## spot on the floor it's looking at instead, at least min_jump_radius away,
 ## and space jumps it down there.
 ##
 ## The ability action (shift) uses the controlled animal's ability, if
-## it has one (see SpecialCrab).
+## it has one (see SpecialCrab). An ability with something to aim at, such as
+## a GrabCrab's prop to pick up or the spot a throw lands, is marked with an
+## arrow like the one for mounting; a throw lands where the view meets the
+## floor, as a jump does.
 ##
-## The rally action (U) takes the group apart from any stacks and drops its
-## animals one by one, rally_interval apart, above the active Flag.
+## The rally action (U) drops the animals that were in the group when the
+## active Flag was taken (see Flag.crabs) back onto it, one by one,
+## rally_interval apart, taking them out of any stacks first. They become the
+## group again, wherever they had got to; any others in the group now stay
+## where they are. It also puts every Grabbable back where it started, flag
+## or no flag; they aren't rallied.
 
 const ANIMAL_GROUP := &"animals"
 
@@ -81,6 +88,8 @@ var jump_target := Vector3.ZERO
 var has_jump_target := false
 
 var _arrow: MeshInstance3D
+# Marks what the controlled animal's ability aims at.
+var _ability_arrow: MeshInstance3D
 # Animals still to drop in a rally, the flag, and seconds to the next drop.
 var _rally_queue: Array[Node3D] = []
 var _rally_flag: Flag
@@ -91,6 +100,8 @@ var _rally_count := 0
 func _ready() -> void:
 	_arrow = _make_arrow()
 	add_child(_arrow)
+	_ability_arrow = _make_arrow()
+	add_child(_ability_arrow)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -110,6 +121,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("rally"):
+		get_tree().call_group(Grabbable.GROUP, "reset")
 		_start_rally()
 		get_viewport().set_input_as_handled()
 		return
@@ -139,13 +151,19 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_membership()
 	_update_jump_target()
+	_update_throw_target()
 	var steered := get_steered()
 	if steered.is_empty():
 		return
-	if controlled:
-		for animal in get_animals():
-			if animal != controlled:
-				animal.move_direction = Vector3.ZERO
+	# Each stack walks on its bottom animal.
+	var walkers: Array[Node3D] = []
+	for animal in steered:
+		var walker := _walker(animal)
+		if walker not in walkers:
+			walkers.append(walker)
+	for animal in get_animals():
+		if animal not in walkers:
+			animal.move_direction = Vector3.ZERO
 
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var cam := get_viewport().get_camera_3d()
@@ -154,16 +172,13 @@ func _physics_process(delta: float) -> void:
 	var right := Vector3(cam_basis.x.x, 0.0, cam_basis.x.z).normalized()
 	var move := right * input.x - forward * input.y
 	if move.length_squared() <= 0.01:
-		for animal in steered:
+		for animal in walkers:
 			animal.move_direction = Vector3.ZERO
 		return
 
 	var focus := get_center() + move.normalized() * converge_distance
 	var limit := deg_to_rad(max_converge_deg)
-	for animal in steered:
-		if animal.get("mount"):
-			animal.move_direction = Vector3.ZERO
-			continue
+	for animal in walkers:
 		var to_focus := focus - animal.global_position
 		to_focus.y = 0.0
 		var turn := 0.0
@@ -186,6 +201,14 @@ func _process(_delta: float) -> void:
 		var size: float = controlled.get("size") if "size" in controlled else 1.0
 		_arrow.global_position = jump_target + Vector3.UP * (0.02 + bob) * size
 		_arrow.scale = Vector3.ONE * size
+	var marker: Variant = null
+	if active and controlled and is_instance_valid(controlled) and controlled.has_method("get_ability_marker"):
+		marker = controlled.get_ability_marker()
+	_ability_arrow.visible = marker != null
+	if marker != null:
+		var size: float = controlled.get("size") if "size" in controlled else 1.0
+		_ability_arrow.global_position = marker + Vector3.UP * (0.02 + bob) * size
+		_ability_arrow.scale = Vector3.ONE * size
 
 
 ## The animal the controlled one can mount nearest the middle of the view.
@@ -211,13 +234,29 @@ func _find_looked_at() -> Node3D:
 	return best
 
 
-## Takes every animal in the group out of its stack, then queues them to drop
-## onto the active flag, the first straight away.
+## Makes the animals that were in the group when the active flag was taken
+## the group again, takes each out of its stack, then queues them to drop onto
+## the flag, the first straight away. The rest of the group is let go, where
+## it is. A flag taken with no group behind it rallies the group as it is.
 func _start_rally() -> void:
 	if not is_instance_valid(Flag.active) or not _rally_queue.is_empty():
 		return
 	_rally_flag = Flag.active
-	_rally_queue = get_animals()
+	var rallied: Array[Node3D] = []
+	for animal in _rally_flag.crabs:
+		if is_instance_valid(animal) and not animal.is_queued_for_deletion() and animal not in rallied:
+			rallied.append(animal)
+	if rallied.is_empty():
+		rallied = get_animals()
+	for animal in get_animals():
+		if animal not in rallied:
+			_release(animal)
+	for animal in rallied:
+		if animal.get_parent() != self:
+			animal.reparent(self)
+	if controlled and controlled not in rallied:
+		_control(null)
+	_rally_queue = rallied
 	_rally_clock = 0.0
 	_rally_count = 0
 	for animal in _rally_queue:
@@ -252,18 +291,41 @@ func _update_jump_target() -> void:
 			or not controlled.has_method("jump_to") or looked_at \
 			or (controlled.has_method("can_walk") and not controlled.can_walk()):
 		return
+	var size: float = controlled.get("size") if "size" in controlled else 1.0
+	var spot: Variant = _view_floor_spot(controlled.global_position, min_jump_radius * size,
+			max_jump_radius * size)
+	if spot == null:
+		return
+	jump_target = spot
+	has_jump_target = true
+
+
+## Where a throw by the controlled animal lands, if it throws (see GrabCrab):
+## like a jump, where the view meets the floor, within its throw radii.
+func _update_throw_target() -> void:
+	if not controlled or not is_instance_valid(controlled) or not "throw_target" in controlled:
+		return
+	var spot: Variant = _view_floor_spot(controlled.global_position, controlled.min_throw_radius,
+			controlled.max_throw_radius)
+	controlled.has_throw_target = spot != null
+	if spot != null:
+		controlled.throw_target = spot
+
+
+## Where the view meets the floor, brought within min_radius..max_radius of
+## `from` across the ground, the way the view looks; null if there's no floor
+## there.
+func _view_floor_spot(from: Vector3, min_radius: float, max_radius: float) -> Variant:
 	var cam := get_viewport().get_camera_3d()
 	if not cam:
-		return
-	var size: float = controlled.get("size") if "size" in controlled else 1.0
-	var from := controlled.global_position
+		return null
 	var view := -cam.global_basis.z
 	var flat_view := Vector3(view.x, 0.0, view.z)
 	if flat_view.length_squared() < 1e-4:
 		flat_view = Vector3(-cam.global_basis.y.x, 0.0, -cam.global_basis.y.z)
 	var dir := flat_view.normalized()
 	var space := get_world_3d().direct_space_state
-	var distance := max_jump_radius * size
+	var distance := max_radius
 	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(
 			cam.global_position, cam.global_position + view * 100.0, floor_mask))
 	if not hit.is_empty():
@@ -271,14 +333,13 @@ func _update_jump_target() -> void:
 		across.y = 0.0
 		if across.dot(dir) > 0.0:
 			distance = across.length()
-	distance = clampf(distance, min_jump_radius * size, max_jump_radius * size)
+	distance = clampf(distance, min_radius, max_radius)
 	var spot := from + dir * distance
 	var down := space.intersect_ray(PhysicsRayQueryParameters3D.create(
 			spot + Vector3.UP * 10.0, spot + Vector3.DOWN * 10.0, floor_mask))
 	if down.is_empty():
-		return
-	jump_target = down.position
-	has_jump_target = true
+		return null
+	return down.position
 
 
 ## A downward-pointing triangle that always faces the camera, drawn over
@@ -371,7 +432,19 @@ func get_cycle() -> Array[Node3D]:
 func _control(animal: Node3D) -> void:
 	if controlled and is_instance_valid(controlled) and controlled != animal:
 		controlled.move_direction = Vector3.ZERO
+		_walker(controlled).move_direction = Vector3.ZERO
+		if "has_throw_target" in controlled:
+			controlled.has_throw_target = false
 	controlled = animal
+
+
+## The animal that walks for `animal`: the bottom of its stack.
+func _walker(animal: Node3D) -> Node3D:
+	if animal.has_method("get_stacked"):
+		var stack: Array = animal.get_stacked()
+		if not stack.is_empty():
+			return stack[0]
+	return animal
 
 
 ## Keeps the controlled animal's cluster of members, or with none controlled
