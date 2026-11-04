@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 
 GODOT="${GODOT:-$HOME/.local/opt/godot-4.7.2/godot}"
 OUT=build/web
-REMOTE=$(git remote get-url origin)
+REMOTE="${REMOTE:-$(git remote get-url origin)}"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
